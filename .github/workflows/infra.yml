@@ -1,0 +1,70 @@
+name: Terraform Plan
+
+on:
+  push:
+    branches: 
+      - main
+  workflow_dispatch:
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+
+permissions:
+  contents: read
+  pull-requests: write
+  
+jobs:
+    terraform:
+        name: Build Infra
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: Setup Terraform
+              uses: hashicorp/setup-terraform@v4
+
+            - name: Terrafom format
+              id: fmt
+              run: terraform fmt -check
+
+            - name: Terraform Init
+              id: init
+              run: |
+                terraform init \
+                -backend-config="resource_group_name=${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}" \
+                -backend-config="storage_account_name=${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}" \
+                -backend-config="container_name=${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}" \
+                -backend-config="key=${{ secrets.BACKEND_STATE_KEY }}"
+
+            - name: Terraform Validate
+              id: validate
+              run: terraform validate -no-color
+            - name: Terraform Plan
+              id: plan
+              run: |
+                terraform plan \
+                    -no-color \
+                    -var="resource_group_name=${{vars.RESOURCE_GROUP_NAME}}" \
+                    -var="location=${{vars.LOCATION}}" \
+                    -out=main.tfplan
+            
+            - name: Terraform Apply
+              id: apply
+              run: terraform apply -auto-approve main.tfplan
+            
+            - name: Terraform Output For KeyVault Secrets
+              run: |
+                echo "TF_VAR_resource_group_name=$(terraform output -raw resource_group_name)" >> data.txt
+                echo "TF_VAR_location=$(terraform output -raw location)" >> data.txt
+            
+            - name: Upload Terraform Output
+              uses: actions/upload-artifact@v4
+              with:
+               name: data
+               path: data.txt
+               retention-days: 1
